@@ -1,12 +1,13 @@
 #include <iostream>
 #include <fftw3.h>
 #include <complex>
+#include <png++/png.hpp>
+#include <iomanip>
 
 using namespace std;
+using namespace png;
 
 #define complex complex<double>
-
-//chcę użyć równania schrodingera dla at wodoru, -\Delta^2\psi-1\r\psi=E\psi, prawd. kombinacja fft i urojonych czasów
 
 class parameters{
 public:
@@ -14,19 +15,17 @@ public:
     double L;
     double dx;
     double dt;
-public:
-    parameters(int n=1024,double L=0.1,double dt=0.01):n(n),L(L),dt(dt){
-     dx=L/n;   
+    parameters(int n=2048,double L=20,double dt=0.1):n(n),L(L),dt(dt){
+        dx=L/n;
     }
     void refresh(){
-     dx=L/n;   
+        dx=L/n;
     }
+    
 }p0;
 
-
 class ffal{
-    complex **tab;
-    complex *ttab;
+    complex *tab;
     int n;
     int n2;
     fftw_plan p1,p2;
@@ -34,81 +33,128 @@ class ffal{
     double L;
     double dx;
     parameters p;
+//     double *kk;
+    double *rr;
+    double *ee;
 public:
     ffal(parameters p=p0):p(p){
+        p.refresh();
+        L=p.L;
         n=p.n;
         n2=n*n;
-        tab=new complex*[n];
-        ttab=new complex[n2];
-        for(int i=0;i<n;i++)tab[i]=new complex[n];
-//         for(int i=0;i<n;i++)
-//             for(int j=0;j<n;j++)tab[i][j]=new complex[n];
-        for(int i=0;i<n;i++)
-            for(int j=0;j<n;j++)tab[i][j]=1;
-        in  = (fftw_complex*) fftw_malloc(sizeof(fftw_complex)*n);
-        out = (fftw_complex*) fftw_malloc(sizeof(fftw_complex)*n);
-        p1  = fftw_plan_dft_1d(n,in,out, 1,FFTW_ESTIMATE);
-        p2  = fftw_plan_dft_1d(n,out,in,-1,FFTW_ESTIMATE);
-        
         dx=p.dx;
+        tab=new complex[n2];
+        rr=new double[n2];
+        for(int i=0;i<n2;i++)tab[i]=1;
+        ee=new double[n2];
+        in  = (fftw_complex*) fftw_malloc(sizeof(fftw_complex)*n2);
+        out = (fftw_complex*) fftw_malloc(sizeof(fftw_complex)*n2);
+        
+        p1  = fftw_plan_dft_2d(n,n,in,out, 1,FFTW_ESTIMATE);
+        p2  = fftw_plan_dft_2d(n,n,out,in,-1,FFTW_ESTIMATE);
+//         kk=new double[n];
+        
     }
-private:
-    void normuj(){
+    ~ffal(){
+    delete[] tab;
+    delete[] ee;
+    fftw_destroy_plan(p1);
+    fftw_destroy_plan(p2);
+    fftw_free(in);
+    fftw_free(out);
+//     delete[] kk;
+    delete[] rr;
+    }
+    
+        double normuj(){
         double sum=0;
-     for(int i=0;i<n2;i++)sum+=norm(tab[i/n][i%n]);
-//          if(i<5100)
-//      cerr<<i<<" "<<sum<<tab[i/n][i%n]<<endl;}
-     sum=sqrt(sum);
-     for(int i=0;i<n2;i++)tab[i/n][i%n]/=sum;
+        for(int i=0;i<n2;i++)sum+=norm(tab[i]);
+        sum=sqrt(sum)*dx;
+        for(int i=0;i<n2;i++)tab[i]/=sum;
+        return sum;
     }
-    inline double r1(int i){
-     return i%n==n/2?0:1/sqrt((i/n-n/2)*(i/n-n/2)+(i%n-n/2)*(i%n-n/2))*dx;   
-    }
-    void mult(){
-     for(int i=0;i<n;i++){
-         for(int j=0;j<n;j++){
-                in[j][0]=tab[i][j].real();
-                in[j][1]=tab[i][j].imag();
-         }
-         fftw_execute(p1);
-         for(int j=0;j<n;j++){
-            int k;
-            if(j<n/2)k=2*j*M_PI/L;
-            else k=(j-n)*2*M_PI/L;
-                out[j][0]*=k*k;
-                out[j][1]*=k*k;
-         }
-         fftw_execute(p2);
-         for(int j=0;j<n;j++)ttab[i*n+j]=complex(in[j][0]/n2,in[j][1]/n2);
-     }
-    }
+
 public:
-    void evolve(){
-        for(int ii=0;ii<10;ii++){
-        mult();
-        for(int i=0;i<n2;i++){tab[i/n][i%n]*=(1+r1(i)*p.dt);tab[i/n][i%n]-=ttab[i]*p.dt;
-            if(i%n==0)cerr<<"\r"<<i;
+    void evolve(int N=10,bool ff=1){
+        for(int i=0;i<n2;i++){
+            int a=i%n<n/2?i%n:i%n-n;
+            int b=i/n<n/2?i/n:i/n-n;
+            double kx=pow(a*2*M_PI/L,2)/2;
+            double ky=pow(b*2*M_PI/L,2)/2;
+            ee[i]=exp(-(kx+ky)*p.dt);
         }
-        normuj();
-        cerr<<endl;
+        for(int i=0;i<n2;i++){
+            double r0=(((pow(i/n-n/2,2)+pow(i%n-n/2,2))*dx*dx));
+            rr[i]=exp(-(r0/2.)*p.dt);
+//             if(i%n==0 or i/n==0 or i%n==n-1 or i/n==n-1)rr[i]=0;
+        }
         
+        
+        for(int ii=0;ii<N;ii++){
+            int t0=time(0);
+                    for(int i=0;i<n2;i++){
+                    in[i][0]=tab[i].real();
+                    in[i][1]=tab[i].imag();
+                }
+            fftw_execute(p1);
+            for(int i=0;i<n2;i++){
+                out[i][0]*=ee[i];
+                out[i][1]*=ee[i];
+            }
+        fftw_execute(p2);
+        for(int i=0;i<n2;i++)tab[i]=complex(in[i][0],in[i][1])/complex(n2,0);
+            for(int i=0;i<n2;i++){
+                tab[i]*=rr[i];
         }
+
+            int t1=time(0);
+            cerr<<ii<<"\t"<<normuj()<<endl;
+            if(ff)plot(ii);
+        }
+        
     }
-    void show(){
+    
+      void plot(int ii=0){
+     image< rgb_pixel > image(n,n);
+     double max=0;
+     for(int i=0;i<n2;i++)
+             if(abs(tab[i])>max)max=abs(tab[i]);
+
      for(int i=0;i<n2;i++){
-         if(i%n==0)cout<<endl;
-         cout<<(i/n-n/2)<<" "<<(i%n-n/2)<<" "<<abs(tab[i/n][i%n])<<endl;   
-   
-     }
-        
-    }
+                double val=abs(tab[i])/max;
+                int r=sqrt(val)*255;
+                int g=val*val*val*val*255;
+                int b=val*(0.5-val)*16*255;
+                if(b<0)b=0;
+                image[i/n][i%n]=rgb_pixel(r,g,b);
+            }
+     char s[64];
+     sprintf(s,"%03d.png",ii);
+     image.write(s);
+ }
+    void copy(complex *&tt){
+        normuj();
+        complex *temp=tt;
+        tt=tab;
+        tab=temp;
+ }
 };
 
 
-
 int main(){
-    ffal psi;   
-    psi.evolve();
-    psi.show();
+    int n=256;
+    int n2=n*n;
+    p0.n=n;
+    p0.dt=0.001;
+    p0.L=20;
     
+    complex *tt;
+    {
+    ffal psi;
+    psi.evolve(500,0);
+    psi.copy(tt);
+    }
+    ffal psi;
+//     psi.evolve
+
 }
