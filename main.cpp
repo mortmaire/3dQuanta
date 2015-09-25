@@ -36,6 +36,9 @@ class ffal{
 //     double *kk;
     double *rr;
     double *ee;
+    fftw_complex *tt[2];
+
+
 public:
     ffal(parameters p=p0):p(p){
         p.refresh();
@@ -53,6 +56,7 @@ public:
         p1  = fftw_plan_dft_2d(n,n,in,out, 1,FFTW_ESTIMATE);
         p2  = fftw_plan_dft_2d(n,n,out,in,-1,FFTW_ESTIMATE);
 //         kk=new double[n];
+    for(int i=0;i<2;i++)tt[i]=(fftw_complex*)fftw_malloc(sizeof(fftw_complex)*n2);
         
     }
     ~ffal(){
@@ -62,7 +66,8 @@ public:
     fftw_destroy_plan(p2);
     fftw_free(in);
     fftw_free(out);
-//     delete[] kk;
+//     fftw_free(tt[0]);
+//     fftw_free(tt[1]);
     delete[] rr;
     }
     
@@ -110,11 +115,12 @@ public:
             int t1=time(0);
             cerr<<ii<<"\t"<<normuj()<<endl;
             if(ff)plot(ii);
+            if(ff)angular_momentum(ii);
         }
         
     }
     
-      void plot(int ii=0){
+void plot(int ii=0){
      image< rgb_pixel > image(n,n);
      double max=0;
      for(int i=0;i<n2;i++)
@@ -132,12 +138,85 @@ public:
      sprintf(s,"%03d.png",ii);
      image.write(s);
  }
+
+void plot2(double *tab,int ii=0){
+     image< rgb_pixel > image(n,n);
+     double max=0;
+     for(int i=0;i<n2;i++)
+             if(abs(tab[i])>max)max=abs(tab[i]);
+
+     for(int i=0;i<n2;i++){
+                double val=abs(tab[i])/max;
+                int r=sqrt(val)*255;
+                int g=val*val*val*val*255;
+                int b=val*(0.5-val)*16*255;
+                if(b<0)b=0;
+                image[i/n][i%n]=rgb_pixel(r,g,b);
+            }
+     char s[64];
+     sprintf(s,"ANG%03d.png",ii);
+     image.write(s);
+ }
+ 
+ 
+ 
     void copy(complex *&tt){
         normuj();
         complex *temp=tt;
         tt=tab;
         tab=temp;
  }
+    void angular_momentum(int ii=0){
+// 
+        double *tab2;
+        tab2=new double[n2];
+        
+        for(int i=0;i<n2;i++){
+            in[i][0]=tab[i].real();
+            in[i][1]=tab[i].imag();
+        }
+        
+        fftw_plan(p1);
+        
+        for(int i=0;i<n2;i++){
+            double yy=2*(i/n<n/2?i/n:i/n-n)*M_PI/L;
+            double xx=2*(i%n<n/2?i%n:i%n-n)*M_PI/L;
+            tt[0][i][0]=out[i][0]*yy;
+            tt[0][i][1]=out[i][1]*yy;
+            tt[1][i][0]=out[i][0]*xx;
+            tt[1][i][1]=out[i][1]*xx;
+        }
+
+        for(int j=0;j<2;j++){
+        
+        
+        for(int i=0;i<n2;i++){
+            out[i][0]=tt[j][i][0];
+            out[i][1]=tt[j][i][1];
+        }
+        
+        fftw_execute(p2);
+
+        for(int i=0;i<n2;i++){
+        tt[j][i][0]=in[i][0];
+        tt[j][i][1]=in[i][1];
+        }
+
+    }
+        double J=0;
+        for(int i=0;i<n2;i++){
+            double x=(i%n-n/2)*dx;
+            double y=(i/n-n/2)*dx;
+            
+        tab2[i]=abs(complex(tt[0][i][0],tt[0][i][1])*x-complex(tt[1][i][0],tt[1][i][1])*y);
+        J+=tab2[i];
+//         if(abs(tab[i])==0)tab2[i]=0;
+        }
+            plot2(tab2,ii);
+             cout<<J/n2<<endl;
+            delete[] tab2;
+    }
+    
 };
 
 
@@ -151,10 +230,10 @@ int main(){
     complex *tt;
     {
     ffal psi;
-    psi.evolve(500,0);
-    psi.copy(tt);
+    psi.evolve(1000);
+//     psi.copy(tt);
     }
-    ffal psi;
+//     ffal psi;
 //     psi.evolve
 
 }
